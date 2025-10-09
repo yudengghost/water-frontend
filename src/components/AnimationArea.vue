@@ -47,10 +47,30 @@ let riverMesh: THREE.Mesh
 let pollutionParticles: THREE.Points
 let pollutionMaterial: THREE.PointsMaterial
 let clock: THREE.Clock
+let diffusionMesh: THREE.Mesh  // 颜色扩散效果的网格
+let diffusionProgress = 0     // 扩散进度 (0-1)
 
 // 渲染器配置
 const RENDERER_CONFIG = {
   antialias: true
+}
+
+// 颜色扩散效果配置
+const DIFFUSION_CONFIG = {
+  speed: 0.3,             // 扩散速度
+  segments: 500,          // 扩散分段数
+  startColor: 0xff0000,   // 起始颜色（红色）
+  endColor: 0x0000ff,     // 结束颜色（蓝色）
+  startOpacity: 0.5,      // 起始透明度
+  endOpacity: 0.1,        // 结束透明度
+  widthRatio: 1.0,        // 扩散宽度与河道宽度的比例
+  startWidthRatio: 1.0,   // 起始宽度与河道宽度的比例
+  endWidthRatio: 0.3,     // 末端宽度与河道宽度的比例
+  endCurveFactor: 0.8,    // 末端曲度因子（控制末端弯曲程度）
+  expansionProgress: 0.7, // 扩展进度（在扩散进度的这个比例时达到最大宽度）
+  curveStartPoint: 0.6,   // 曲线开始点（从这个位置开始弯曲）
+  curveMidPoint: 0.8,     // 曲线中点（在这个位置达到最大弯曲）
+  arcRadius: 0.4          // 圆弧半径因子（控制末端圆弧的大小）
 }
 
 // 粒子系统配置
@@ -60,7 +80,7 @@ const PARTICLE_CONFIG = {
   sizeRange: [0.05, 0.2], // 粒子大小范围
   opacity: 0.8,          // 粒子透明度
   randomFactor: 0.1,     // 随机流动因子
-  lateralFactor: 0.2,    // 横向流动因子
+  lateralFactor: 1.0,    // 横向流动因子（控制粒子在河道内的横向移动范围）
   maxPollutionDistance: 16,  // 最大污染距离
   riverMoveSpeedFactor: 2,   // 粒子向河道移动的速度因子
   boundary: {           // 边界范围
@@ -114,6 +134,9 @@ const initThreeJS = () => {
 
   // 创建污染粒子系统
   createPollutionParticles()
+
+  // 创建颜色扩散效果
+  createDiffusionEffect()
 
   // 创建时钟
   clock = new THREE.Clock()
@@ -322,6 +345,190 @@ const createPollutionParticles = () => {
   scene.add(pollutionParticles)
 }
 
+// 创建颜色扩散效果
+const createDiffusionEffect = () => {
+  // 创建扩散曲线
+  const riverCurve = createRiverCurve()
+  
+  // 创建扩散形状
+  const diffusionShape = createDiffusionShape(riverCurve, 0)
+  
+  // 创建扩散几何体
+  const geometry = new THREE.ShapeGeometry(diffusionShape)
+  
+  // 创建扩散材质
+  const material = new THREE.MeshBasicMaterial({
+    color: DIFFUSION_CONFIG.startColor,
+    transparent: true,
+    opacity: DIFFUSION_CONFIG.startOpacity,
+    side: THREE.DoubleSide
+  })
+  
+  // 创建扩散网格
+  diffusionMesh = new THREE.Mesh(geometry, material)
+  scene.add(diffusionMesh)
+}
+
+// 创建扩散形状
+const createDiffusionShape = (riverCurve: THREE.SplineCurve, progress: number) => {
+  const diffusionShape = new THREE.Shape()
+  const curvePoints = riverCurve.getPoints(DIFFUSION_CONFIG.segments)
+  
+  // 计算当前扩散的点数
+  const currentPoints = Math.floor(curvePoints.length * progress)
+  if (currentPoints < 2) return diffusionShape
+  
+  // 计算河道两侧的点
+  const leftPoints: THREE.Vector2[] = []
+  const rightPoints: THREE.Vector2[] = []
+  
+  for (let i = 0; i < currentPoints; i++) {
+    const point = curvePoints[i]
+    
+    // 计算切线方向
+    let tangent = new THREE.Vector2()
+    if (i < curvePoints.length - 1) {
+      tangent = curvePoints[i + 1].clone().sub(point).normalize()
+    } else {
+      tangent = point.clone().sub(curvePoints[i - 1]).normalize()
+    }
+    
+    // 计算法线方向（垂直于切线）
+    const normal = new THREE.Vector2(-tangent.y, tangent.x)
+    
+    // 计算该位置的河道宽度
+    const riverWidth = calculateRiverWidth(i / curvePoints.length)
+    
+    // 计算当前点的进度比例（0到1）
+    const pointProgress = i / currentPoints
+    
+    // 计算宽度变化因子（从起始宽度到末端宽度）
+    let widthRatio
+    if (progress < DIFFUSION_CONFIG.expansionProgress) {
+      // 在扩展进度之前，宽度从起始宽度逐渐增加到河道宽度
+      const expansionFactor = progress / DIFFUSION_CONFIG.expansionProgress
+      widthRatio = DIFFUSION_CONFIG.startWidthRatio + 
+                  (1.0 - DIFFUSION_CONFIG.startWidthRatio) * expansionFactor
+    } else {
+      // 在扩展进度之后，宽度保持为河道宽度
+      widthRatio = 1.0
+    }
+    
+    // 在末端添加曲度效果
+    if (pointProgress > 0.7) {
+      // 计算末端曲度因子（越靠近末端，曲度越大）
+      const endCurveProgress = (pointProgress - 0.7) / 0.3
+      const endCurveFactor = Math.pow(endCurveProgress, 2) * DIFFUSION_CONFIG.endCurveFactor
+      
+      // 应用末端曲度，使末端宽度逐渐减小
+      widthRatio *= (1.0 - endCurveFactor)
+      
+      // 添加圆弧状弯曲效果
+      const arcRadius = DIFFUSION_CONFIG.arcRadius * riverWidth
+      const arcAngle = endCurveProgress * Math.PI // 0到π的角度变化
+      
+      // 计算圆弧偏移量
+      const arcOffsetX = Math.sin(arcAngle) * arcRadius
+      const arcOffsetY = Math.cos(arcAngle) * arcRadius - arcRadius
+      
+      // 计算扩散两侧的点，并添加圆弧效果
+      const leftPoint = new THREE.Vector2(
+        point.x + normal.x * riverWidth * widthRatio + arcOffsetX,
+        point.y + normal.y * riverWidth * widthRatio + arcOffsetY
+      )
+      const rightPoint = new THREE.Vector2(
+        point.x - normal.x * riverWidth * widthRatio + arcOffsetX,
+        point.y - normal.y * riverWidth * widthRatio + arcOffsetY
+      )
+      
+      leftPoints.push(leftPoint)
+      rightPoints.push(rightPoint)
+    } else {
+      // 非末端区域，正常计算扩散宽度
+      const diffusionWidth = riverWidth * widthRatio
+      
+      // 计算扩散两侧的点
+      const leftPoint = new THREE.Vector2(
+        point.x + normal.x * diffusionWidth,
+        point.y + normal.y * diffusionWidth
+      )
+      const rightPoint = new THREE.Vector2(
+        point.x - normal.x * diffusionWidth,
+        point.y - normal.y * diffusionWidth
+      )
+      
+      leftPoints.push(leftPoint)
+      rightPoints.push(rightPoint)
+    }
+  }
+  
+  // 创建扩散形状
+  diffusionShape.moveTo(leftPoints[0].x, leftPoints[0].y)
+  for (let i = 1; i < leftPoints.length; i++) {
+    diffusionShape.lineTo(leftPoints[i].x, leftPoints[i].y)
+  }
+  for (let i = rightPoints.length - 1; i >= 0; i--) {
+    diffusionShape.lineTo(rightPoints[i].x, rightPoints[i].y)
+  }
+  diffusionShape.closePath()
+  
+  return diffusionShape
+}
+
+// 更新颜色扩散效果
+const updateDiffusionEffect = (deltaTime: number) => {
+  if (!diffusionMesh) return
+  
+  // 更新扩散进度
+  diffusionProgress += deltaTime * DIFFUSION_CONFIG.speed
+  
+  // 如果扩散进度达到 1，则重置为 0，实现循环播放
+  if (diffusionProgress >= 1) {
+    diffusionProgress = 0
+  }
+  
+  // 创建河道曲线
+  const riverCurve = createRiverCurve()
+  
+  // 创建新的扩散形状
+  const diffusionShape = createDiffusionShape(riverCurve, diffusionProgress)
+  
+  // 更新几何体
+  const geometry = new THREE.ShapeGeometry(diffusionShape)
+  diffusionMesh.geometry.dispose()
+  diffusionMesh.geometry = geometry
+  
+  // 更新材质颜色和透明度
+  const material = diffusionMesh.material as THREE.MeshBasicMaterial
+  
+  // 计算当前颜色（从红色到蓝色的渐变）
+  const startColor = new THREE.Color(DIFFUSION_CONFIG.startColor)
+  const endColor = new THREE.Color(DIFFUSION_CONFIG.endColor)
+  const currentColor = startColor.clone().lerp(endColor, diffusionProgress)
+  material.color = currentColor
+  
+  // 计算当前透明度
+  const currentOpacity = DIFFUSION_CONFIG.startOpacity + 
+                        (DIFFUSION_CONFIG.endOpacity - DIFFUSION_CONFIG.startOpacity) * diffusionProgress
+  material.opacity = currentOpacity
+}
+
+// 重置颜色扩散效果
+const resetDiffusionEffect = () => {
+  diffusionProgress = 0
+  if (diffusionMesh) {
+    const riverCurve = createRiverCurve()
+    const diffusionShape = createDiffusionShape(riverCurve, 0)
+    const geometry = new THREE.ShapeGeometry(diffusionShape)
+    diffusionMesh.geometry.dispose()
+    diffusionMesh.geometry = geometry
+    
+    const material = diffusionMesh.material as THREE.MeshBasicMaterial
+    material.color = new THREE.Color(DIFFUSION_CONFIG.startColor)
+    material.opacity = DIFFUSION_CONFIG.startOpacity
+  }
+}
+
 // 初始化粒子属性
 const initializeParticles = (
   positions: Float32Array,
@@ -344,7 +551,7 @@ const initializeParticles = (
     const riverWidth = calculateRiverWidth(t)
     
     // 在河道宽度内随机偏移
-    const lateralOffset = (Math.random() - 0.5) * riverWidth * 0.8
+    const lateralOffset = (Math.random() - 0.5) * riverWidth
     
     // 初始位置在河道内随机分布
     positions[i3] = point.x + normal.x * lateralOffset
@@ -519,7 +726,7 @@ const checkParticleBoundaries = (
   if (x > PARTICLE_CONFIG.boundary.x.max || x < PARTICLE_CONFIG.boundary.x.min || y > PARTICLE_CONFIG.boundary.y.max || y < PARTICLE_CONFIG.boundary.y.min) {
     // 重置位置到污染源附近，但在整个河道宽度内随机分布
     const randomAngle = Math.random() * Math.PI * 2
-    const randomRadius = Math.random() * baseRiverWidth * 0.8
+    const randomRadius = Math.random() * baseRiverWidth
     
     positions[i3] = pollutionSource.value.x + Math.cos(randomAngle) * randomRadius
     positions[i3 + 1] = pollutionSource.value.y + Math.sin(randomAngle) * randomRadius
@@ -538,6 +745,7 @@ const animate = () => {
   if (isPlaying.value) {
     const deltaTime = clock.getDelta()
     updatePollutionParticles(deltaTime * animationSpeed.value)
+    updateDiffusionEffect(deltaTime * animationSpeed.value)
   }
   
   renderer.render(scene, camera)
@@ -607,6 +815,9 @@ const resetAnimation = () => {
     pollutionParticles.geometry.attributes.position.needsUpdate = true
     pollutionParticles.geometry.attributes.color.needsUpdate = true
   }
+  
+  // 重置颜色扩散效果
+  resetDiffusionEffect()
 }
 
 // 组件挂载时初始化
