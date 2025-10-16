@@ -9,9 +9,9 @@ const router = createRouter({
       component: () => import('../views/HomeView.vue'),
     },
     {
-      path: '/animation-play',
-      name: 'animation-play',
-      component: () => import('../views/AnimationPlay.vue'),
+      path: '/simulation',
+      name: 'simulation',
+      component: () => import('../views/Simulation.vue'),
     },
   ],
 })

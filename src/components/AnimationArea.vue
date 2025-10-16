@@ -61,7 +61,7 @@ const DIFFUSION_CONFIG = {
   segments: 500,          // 扩散分段数
   startColor: 0xff0000,   // 起始颜色（红色）
   endColor: 0x0000ff,     // 结束颜色（蓝色）
-  startOpacity: 0.5,      // 起始透明度
+  startOpacity: 0.3,      // 起始透明度
   endOpacity: 0.1,        // 结束透明度
   widthRatio: 1.0,        // 扩散宽度与河道宽度的比例
   startWidthRatio: 1.0,   // 起始宽度与河道宽度的比例
@@ -427,18 +427,19 @@ const createDiffusionShape = (riverCurve: THREE.SplineCurve, progress: number) =
       const arcRadius = DIFFUSION_CONFIG.arcRadius * riverWidth
       const arcAngle = endCurveProgress * Math.PI // 0到π的角度变化
       
-      // 计算圆弧偏移量
-      const arcOffsetX = Math.sin(arcAngle) * arcRadius
-      const arcOffsetY = Math.cos(arcAngle) * arcRadius - arcRadius
+      // 计算圆弧偏移量，基于河流的切线方向
+      const arcOffsetX = Math.sin(arcAngle) * arcRadius * tangent.x
+      const arcOffsetY = Math.sin(arcAngle) * arcRadius * tangent.y
+      const arcNormalOffset = (Math.cos(arcAngle) - 1) * arcRadius
       
       // 计算扩散两侧的点，并添加圆弧效果
       const leftPoint = new THREE.Vector2(
-        point.x + normal.x * riverWidth * widthRatio + arcOffsetX,
-        point.y + normal.y * riverWidth * widthRatio + arcOffsetY
+        point.x + normal.x * riverWidth * widthRatio + arcOffsetX + normal.x * arcNormalOffset,
+        point.y + normal.y * riverWidth * widthRatio + arcOffsetY + normal.y * arcNormalOffset
       )
       const rightPoint = new THREE.Vector2(
-        point.x - normal.x * riverWidth * widthRatio + arcOffsetX,
-        point.y - normal.y * riverWidth * widthRatio + arcOffsetY
+        point.x - normal.x * riverWidth * widthRatio + arcOffsetX - normal.x * arcNormalOffset,
+        point.y - normal.y * riverWidth * widthRatio + arcOffsetY - normal.y * arcNormalOffset
       )
       
       leftPoints.push(leftPoint)
