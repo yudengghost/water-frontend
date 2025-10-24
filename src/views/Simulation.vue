@@ -34,8 +34,8 @@
         <div class="control-panel h-full">
           <h2 class="text-xl font-bold gradient-text mb-4">模拟控制面板</h2>
           
-          <!-- Playback Controls -->
-          <div class="mb-6">
+          <!-- Playback Controls (仅在正演模式下显示) -->
+          <div class="mb-6" v-if="simulation.calculationType === 'forward'">
             <h3 class="text-lg font-semibold mb-3 text-cyan-400">播放控制</h3>
             <div class="flex flex-wrap gap-2">
               <button @click="startSimulation" class="control-button" v-if="!simulation.isRunning">
@@ -71,6 +71,14 @@
             <h3 class="text-lg font-semibold mb-3 text-cyan-400">计算模式</h3>
             
             <div class="mb-3">
+              <label class="block text-sm text-gray-300 mb-2">计算类型</label>
+              <select v-model="simulation.calculationType" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white">
+                <option value="forward">正演（预测浓度）</option>
+                <option value="inverse">反演（定位污染源）</option>
+              </select>
+            </div>
+            
+            <div class="mb-3" v-if="simulation.calculationType === 'forward'">
               <label class="block text-sm text-gray-300 mb-2">污染源类型</label>
               <select v-model="simulation.sourceType" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white">
                 <option value="instant">瞬时源</option>
@@ -78,7 +86,7 @@
               </select>
           </div>
           
-            <div class="mb-3">
+            <div class="mb-3" v-if="simulation.calculationType === 'forward'">
               <label class="block text-sm text-gray-300 mb-2">维度</label>
               <select v-model="simulation.dimension" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white">
                 <option value="1D">一维</option>
@@ -87,8 +95,8 @@
               </select>
             </div>
 
-            <!-- 参数输入 -->
-            <div class="space-y-3 mt-4">
+            <!-- 正演参数输入 -->
+            <div class="space-y-3 mt-4" v-if="simulation.calculationType === 'forward'">
               <div v-if="simulation.sourceType === 'instant'">
                 <label class="block text-sm text-gray-300 mb-2">投放质量 M (kg)</label>
                 <input type="number" v-model.number="simulation.params.M" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" min="0" step="0.1">
@@ -120,8 +128,50 @@
               </div>
             </div>
 
-            <!-- 观测点设置 -->
-            <div class="mt-4 pt-4 border-t border-slate-600">
+            <!-- 反演参数输入 -->
+            <div class="space-y-3 mt-4" v-if="simulation.calculationType === 'inverse'">
+              <div class="bg-cyan-900 bg-opacity-30 border border-cyan-600 rounded-lg p-3 mb-3">
+                <p class="text-xs text-cyan-300">反演计算说明：输入观测到的浓度和相关参数，系统将计算污染源距离。目前仅支持一维瞬时源反演。</p>
+              </div>
+
+              <div>
+                <label class="block text-sm text-gray-300 mb-2">观测浓度 C (mg/L)</label>
+                <input type="number" v-model.number="simulation.inverseParams.C" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" min="0.001" step="0.001">
+              </div>
+
+              <div>
+                <label class="block text-sm text-gray-300 mb-2">观测时间 t (秒)</label>
+                <input type="number" v-model.number="simulation.inverseParams.t" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" min="1" step="1">
+              </div>
+
+              <div>
+                <label class="block text-sm text-gray-300 mb-2">投放质量 M (kg)</label>
+                <input type="number" v-model.number="simulation.inverseParams.M" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" min="0.1" step="0.1">
+              </div>
+
+              <div>
+                <label class="block text-sm text-gray-300 mb-2">扩散系数 D (m²/s)</label>
+                <input type="number" v-model.number="simulation.inverseParams.D" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" min="0.01" step="0.01">
+              </div>
+
+              <button @click="calculateInverse" class="control-button w-full mt-3">
+                <span class="flex items-center justify-center">
+                  计算污染源位置
+                </span>
+              </button>
+
+              <!-- 反演结果显示 -->
+              <div v-if="simulation.inverseResult !== null" class="mt-4 p-4 bg-gradient-to-r from-cyan-900 to-blue-900 bg-opacity-50 border border-cyan-500 rounded-lg">
+                <div class="text-sm text-gray-300 mb-2">污染源距离</div>
+                <div class="text-3xl font-bold text-cyan-400 text-center">
+                  {{ simulation.inverseResult.toFixed(2) }}
+                </div>
+                <div class="text-center text-sm text-gray-300 mt-1">米 (m)</div>
+              </div>
+            </div>
+
+            <!-- 观测点设置（仅在正演模式下显示） -->
+            <div class="mt-4 pt-4 border-t border-slate-600" v-if="simulation.calculationType === 'forward'">
               <h4 class="text-md font-semibold mb-3 text-cyan-400">观测点位置</h4>
               <div class="space-y-3">
                 <div>
@@ -172,8 +222,8 @@
       <!-- Data Panel -->
       <div class="data-area">
         <div class="space-y-4">
-           <!-- Real-time Data -->
-           <div class="data-card">
+           <!-- Real-time Data (仅在正演模式下显示) -->
+           <div class="data-card" v-if="simulation.calculationType === 'forward'">
              <h3 class="text-lg font-semibold mb-3 text-cyan-400">观测点数据</h3>
              <div class="text-sm text-gray-300 mb-1">观测点浓度</div>
              <div class="concentration-display">{{ observationConcentration.toFixed(3) }}</div>
@@ -193,15 +243,42 @@
                </div>
              </div>
            </div>
+           
+           <!-- Inverse Result (仅在反演模式下显示) -->
+           <div class="data-card" v-if="simulation.calculationType === 'inverse'">
+             <h3 class="text-lg font-semibold mb-3 text-cyan-400">反演计算结果</h3>
+             <div v-if="simulation.inverseResult !== null">
+               <div class="text-sm text-gray-300 mb-1">污染源距离</div>
+               <div class="concentration-display">{{ simulation.inverseResult.toFixed(2) }}</div>
+               <div class="text-center text-sm text-gray-300 mb-3">米 (m)</div>
+               <div class="space-y-2">
+                 <div class="flex justify-between">
+                   <span class="text-gray-300">计算类型</span>
+                   <span class="text-white">一维瞬时源反演</span>
+                 </div>
+                 <div class="flex justify-between">
+                   <span class="text-gray-300">观测浓度</span>
+                   <span class="text-cyan-400">{{ simulation.inverseParams.C }} mg/L</span>
+                 </div>
+                 <div class="flex justify-between">
+                   <span class="text-gray-300">观测时间</span>
+                   <span class="text-cyan-400">{{ simulation.inverseParams.t }} 秒</span>
+                 </div>
+               </div>
+             </div>
+             <div v-else class="text-center text-gray-400 py-8">
+               请在左侧输入参数并点击"计算污染源位置"按钮
+             </div>
+           </div>
 
-          <!-- Warning System -->
-          <div class="data-card">
+          <!-- Warning System (仅在正演模式下显示) -->
+          <div class="data-card" v-if="simulation.calculationType === 'forward'">
             <h3 class="text-lg font-semibold mb-3 text-cyan-400">预警系统</h3>
             <div class="space-y-2" v-html="warningMessages"></div>
           </div>
 
-          <!-- Chart -->
-          <div class="data-card">
+          <!-- Chart (仅在正演模式下显示) -->
+          <div class="data-card" v-if="simulation.calculationType === 'forward'">
             <h3 class="text-lg font-semibold mb-3 text-cyan-400">观测点浓度趋势</h3>
             <div ref="concentrationChart" style="height: 200px;"></div>
           </div>
@@ -211,22 +288,30 @@
             <h3 class="text-lg font-semibold mb-3 text-cyan-400">统计信息</h3>
             <div class="space-y-2 text-sm">
               <div class="flex justify-between">
+                <span class="text-gray-300">计算类型</span>
+                <span class="text-white">{{ simulation.calculationType === 'forward' ? '正演' : '反演' }}</span>
+              </div>
+              <div class="flex justify-between" v-if="simulation.calculationType === 'forward'">
                 <span class="text-gray-300">模拟时长</span>
                 <span class="text-white">{{ simulationDuration }}秒</span>
               </div>
-              <div class="flex justify-between">
+              <div class="flex justify-between" v-if="simulation.calculationType === 'forward'">
                 <span class="text-gray-300">计算公式</span>
                 <span class="text-white">{{ simulation.sourceType === 'instant' ? '瞬时源' : '有限源' }}</span>
               </div>
-              <div class="flex justify-between">
+              <div class="flex justify-between" v-if="simulation.calculationType === 'forward'">
                 <span class="text-gray-300">维度</span>
                 <span class="text-white">{{ simulation.dimension }}</span>
               </div>
-              <div class="flex justify-between">
-                <span class="text-gray-300">计算精度</span>
-                <span class="text-white">±0.001 mg/L</span>
+              <div class="flex justify-between" v-if="simulation.calculationType === 'inverse'">
+                <span class="text-gray-300">反演模式</span>
+                <span class="text-white">一维瞬时源</span>
               </div>
               <div class="flex justify-between">
+                <span class="text-gray-300">计算精度</span>
+                <span class="text-white">±0.001 {{ simulation.calculationType === 'forward' ? 'mg/L' : 'm' }}</span>
+              </div>
+              <div class="flex justify-between" v-if="simulation.calculationType === 'forward'">
                 <span class="text-gray-300">更新频率</span>
                 <span class="text-white">实时</span>
               </div>
@@ -236,7 +321,9 @@
           <!-- Scientific Parameters -->
           <div class="data-card">
             <h3 class="text-lg font-semibold mb-3 text-cyan-400">计算参数</h3>
-            <div class="space-y-2 text-sm">
+            
+            <!-- 正演模式参数 -->
+            <div class="space-y-2 text-sm" v-if="simulation.calculationType === 'forward'">
               <div class="flex justify-between">
                 <span class="text-gray-300">扩散系数 D</span>
                 <span class="text-white">{{ simulation.params.D }} m²/s</span>
@@ -258,6 +345,26 @@
                 </span>
               </div>
             </div>
+            
+            <!-- 反演模式参数 -->
+            <div class="space-y-2 text-sm" v-if="simulation.calculationType === 'inverse'">
+              <div class="flex justify-between">
+                <span class="text-gray-300">观测浓度 C</span>
+                <span class="text-white">{{ simulation.inverseParams.C }} mg/L</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-300">观测时间 t</span>
+                <span class="text-white">{{ simulation.inverseParams.t }} 秒</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-300">投放质量 M</span>
+                <span class="text-white">{{ simulation.inverseParams.M }} kg</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-300">扩散系数 D</span>
+                <span class="text-white">{{ simulation.inverseParams.D }} m²/s</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -269,6 +376,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue';
 import * as echarts from 'echarts';
 import * as calculator from '@/utils/pollutionCalculator';
+import { inverseCalculate1D } from '@/utils/pollutionCalculator';
 
 /* ==================== 常量定义 ==================== */
 const CONSTANTS = {
@@ -293,6 +401,9 @@ const simulation = reactive({
   currentTime: 0,
   lastFrameTime: 0,
   
+  // 计算类型
+  calculationType: 'forward', // 'forward' (正演) 或 'inverse' (反演)
+  
   // 模拟模式（固定为科学模式）
   mode: 'scientific',
   sourceType: 'instant', // 'instant' 或 'finite'
@@ -307,6 +418,17 @@ const simulation = reactive({
     b: 5, // 污染源半宽 (m)
     c: 5  // 污染源半高 (m)
   },
+  
+  // 反演参数
+  inverseParams: {
+    C: 10, // 观测浓度 (mg/L)
+    t: 100, // 观测时间 (秒)
+    M: 1000, // 投放质量 (kg)
+    D: 1.0 // 扩散系数 (m²/s)
+  },
+  
+  // 反演结果
+  inverseResult: null,
   
   // 河道数据
   riverWidth: CONSTANTS.RIVER_WIDTH,
@@ -708,6 +830,36 @@ const resetSimulation = () => {
       xAxis: { data: [] },
       series: [{ data: [] }]
     });
+  }
+};
+
+// 反演计算
+const calculateInverse = () => {
+  try {
+    const { C, t, M, D } = simulation.inverseParams;
+    
+    // 参数验证
+    if (C <= 0 || t <= 0 || M <= 0 || D <= 0) {
+      alert('请输入有效的参数值（所有参数必须大于0）');
+      return;
+    }
+    
+    // 执行反演计算
+    const distance = inverseCalculate1D(D, t, C, M);
+    
+    if (distance === 0) {
+      alert('反演计算失败：参数组合不合理。请检查：\n1. 观测浓度是否过高或过低\n2. 时间、质量、扩散系数是否合理');
+      simulation.inverseResult = null;
+      return;
+    }
+    
+    // 保存结果
+    simulation.inverseResult = distance;
+    
+  } catch (error) {
+    console.error('反演计算出错:', error);
+    alert('反演计算出错：' + error.message);
+    simulation.inverseResult = null;
   }
 };
 

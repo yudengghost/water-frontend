@@ -146,3 +146,48 @@ export function calculate3Dli(x, y, z, t, C0, D, a, b, c) {
   return isNaN(result) || !isFinite(result) ? 0 : result;
 }
 
+/* ==================== 反演计算 ==================== */
+
+/**
+ * 一维瞬时源反演：根据观测到的浓度、时间等参数反推污染源距离
+ * @param {number} D 扩散系数
+ * @param {number} t 时间
+ * @param {number} C 观测到的浓度
+ * @param {number} M 投放质量
+ * @returns {number} 污染源距离 x（正值）
+ */
+export function inverseCalculate1D(D, t, C, M) {
+  // 参数验证
+  if (D <= 0 || t <= 0 || C <= 0 || M <= 0) {
+    return 0;
+  }
+  
+  try {
+    // 计算括号内的表达式：C / M * sqrt(4 * pi * D * t)
+    const term = C / M * Math.sqrt(4 * Math.PI * D * t);
+    
+    // 检查term是否有效（必须小于1，因为要取对数）
+    if (term <= 0 || term >= 1) {
+      console.warn('反演计算参数无效：term值超出范围', term);
+      return 0;
+    }
+    
+    // 计算 x^2 = -4 * D * t * ln(term)
+    const x_squared = -4 * D * t * Math.log(term);
+    
+    // 检查x_squared是否为正数
+    if (x_squared < 0) {
+      console.warn('反演计算结果无效：x_squared为负数', x_squared);
+      return 0;
+    }
+    
+    // 计算 x（取正值，因为距离为正）
+    const x = Math.sqrt(x_squared);
+    
+    return isNaN(x) || !isFinite(x) ? 0 : x;
+  } catch (error) {
+    console.error('反演计算出错:', error);
+    return 0;
+  }
+}
+
