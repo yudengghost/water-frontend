@@ -1,5 +1,39 @@
 <template>
   <div class="text-white">
+    <!-- AI 助手悬浮球 -->
+    <button @click="toggleAIChat" class="ai-float-button" :class="{ 'active': showAIChat }">
+      <svg v-if="!showAIChat" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+      </svg>
+      <svg v-else class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+      </svg>
+    </button>
+
+    <!-- 数据导入确认对话框 -->
+    <div v-if="showImportDialog" class="import-dialog-overlay" @click="closeImportDialog">
+      <div class="import-dialog" @click.stop>
+        <h3 class="import-dialog-title">导入模拟数据</h3>
+        <p class="import-dialog-text">是否要将当前模拟数据导入到 AI 助手进行分析？</p>
+        <div class="import-dialog-buttons">
+          <button @click="importData" class="import-button import-button-primary">
+            导入数据
+          </button>
+          <button @click="skipImport" class="import-button import-button-secondary">
+            暂不导入
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Coze AI 聊天窗口 -->
+    <CozeChat 
+      v-model:visible="showAIChat" 
+      :simulation-data="simulationDataForAI"
+      ref="cozeChatRef"
+      @close="handleAIChatClose"
+    />
+
     <!-- Navigation -->
     <nav class="fixed top-0 w-full z-50 glass-effect">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -377,6 +411,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue';
 import * as echarts from 'echarts';
 import * as calculator from '@/utils/pollutionCalculator';
 import { inverseCalculate1D } from '@/utils/pollutionCalculator';
+import CozeChat from '@/components/CozeChat.vue';
 
 /* ==================== 常量定义 ==================== */
 const CONSTANTS = {
@@ -454,6 +489,12 @@ const simulation = reactive({
 /* ==================== DOM 引用 ==================== */
 const simulationCanvas = ref(null);
 const concentrationChart = ref(null);
+const cozeChatRef = ref(null);
+
+/* ==================== AI 助手相关状态 ==================== */
+const showAIChat = ref(false);
+const showImportDialog = ref(false);
+const hasAskedImport = ref(false);
 
 /* ==================== 全局变量 ==================== */
 let chartInstance = null;
@@ -566,6 +607,22 @@ const warningMessages = computed(() => {
   }
   
   return warnings.join('');
+});
+
+// 准备发送给 AI 的模拟数据
+const simulationDataForAI = computed(() => {
+  return {
+    calculationType: simulation.calculationType,
+    dimension: simulation.dimension,
+    sourceType: simulation.sourceType,
+    simulationDuration: simulationDuration.value,
+    observationPoint: simulation.observationPoint,
+    observationConcentration: observationConcentration.value.toFixed(3),
+    avgConcentration: avgConcentration.value.toFixed(3),
+    params: simulation.params,
+    inverseParams: simulation.inverseParams,
+    inverseResult: simulation.inverseResult
+  };
 });
 
 /* ==================== 初始化函数 ==================== */
@@ -861,6 +918,46 @@ const calculateInverse = () => {
     alert('反演计算出错：' + error.message);
     simulation.inverseResult = null;
   }
+};
+
+/* ==================== AI 助手相关函数 ==================== */
+
+// 切换 AI 聊天窗口
+const toggleAIChat = () => {
+  showAIChat.value = !showAIChat.value;
+  
+  // 如果是第一次打开，且未询问过数据导入，则显示导入对话框
+  if (showAIChat.value && !hasAskedImport.value) {
+    showImportDialog.value = true;
+    hasAskedImport.value = true;
+  }
+};
+
+// 导入数据
+const importData = () => {
+  showImportDialog.value = false;
+  
+  // 等待 AI 聊天窗口加载完成后发送数据
+  setTimeout(() => {
+    if (cozeChatRef.value) {
+      cozeChatRef.value.sendSimulationData();
+    }
+  }, 1000);
+};
+
+// 跳过导入
+const skipImport = () => {
+  showImportDialog.value = false;
+};
+
+// 关闭导入对话框
+const closeImportDialog = () => {
+  showImportDialog.value = false;
+};
+
+// 关闭 AI 聊天窗口
+const handleAIChatClose = () => {
+  showAIChat.value = false;
 };
 
 
@@ -1721,5 +1818,177 @@ input[type="number"]:focus {
 
 .text-white {
   color: rgba(255, 255, 255, 1);
+}
+
+/* AI 助手悬浮球 */
+.ai-float-button {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #06B6D4, #3B82F6);
+  border: none;
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 8px 30px rgba(6, 182, 212, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  z-index: 999;
+  animation: float-pulse 3s ease-in-out infinite;
+}
+
+.ai-float-button:hover {
+  transform: scale(1.1);
+  box-shadow: 0 12px 40px rgba(6, 182, 212, 0.6);
+}
+
+.ai-float-button.active {
+  background: linear-gradient(135deg, #F59E0B, #D97706);
+  box-shadow: 0 8px 30px rgba(245, 158, 11, 0.4);
+}
+
+.ai-float-button.active:hover {
+  box-shadow: 0 12px 40px rgba(245, 158, 11, 0.6);
+}
+
+.ai-float-button .w-6 {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+@keyframes float-pulse {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* 数据导入对话框 */
+.import-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1001;
+  animation: fadeIn 0.3s ease;
+}
+
+.import-dialog {
+  background: rgba(30, 41, 59, 0.98);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-radius: 16px;
+  padding: 2rem;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.import-dialog-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #06B6D4, #3B82F6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.import-dialog-text {
+  color: rgba(209, 213, 219, 1);
+  font-size: 1rem;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.import-dialog-buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.import-button {
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 1rem;
+}
+
+.import-button-primary {
+  background: linear-gradient(135deg, #06B6D4, #0891B2);
+  color: white;
+  box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3);
+}
+
+.import-button-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(6, 182, 212, 0.4);
+}
+
+.import-button-secondary {
+  background: rgba(100, 116, 139, 0.3);
+  color: white;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+}
+
+.import-button-secondary:hover {
+  background: rgba(100, 116, 139, 0.5);
+  transform: translateY(-2px);
+}
+
+/* 响应式设计 - AI 助手 */
+@media (max-width: 768px) {
+  .ai-float-button {
+    bottom: 20px;
+    right: 20px;
+    width: 50px;
+    height: 50px;
+  }
+  
+  .ai-float-button .w-6 {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  
+  .import-dialog {
+    padding: 1.5rem;
+  }
+  
+  .import-dialog-buttons {
+    flex-direction: column;
+  }
+  
+  .import-button {
+    width: 100%;
+  }
 }
 </style>
