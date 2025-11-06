@@ -10,22 +10,6 @@
       </svg>
     </button>
 
-    <!-- 数据导入确认对话框 -->
-    <div v-if="showImportDialog" class="import-dialog-overlay" @click="closeImportDialog">
-      <div class="import-dialog" @click.stop>
-        <h3 class="import-dialog-title">导入模拟数据</h3>
-        <p class="import-dialog-text">是否要将当前模拟数据导入到 AI 助手进行分析？</p>
-        <div class="import-dialog-buttons">
-          <button @click="importData" class="import-button import-button-primary">
-            导入数据
-          </button>
-          <button @click="skipImport" class="import-button import-button-secondary">
-            暂不导入
-          </button>
-        </div>
-      </div>
-    </div>
-
     <!-- Coze AI 聊天窗口 -->
     <CozeChat 
       v-model:visible="showAIChat" 
@@ -493,8 +477,6 @@ const cozeChatRef = ref(null);
 
 /* ==================== AI 助手相关状态 ==================== */
 const showAIChat = ref(false);
-const showImportDialog = ref(false);
-const hasAskedImport = ref(false);
 
 /* ==================== 全局变量 ==================== */
 let chartInstance = null;
@@ -925,34 +907,6 @@ const calculateInverse = () => {
 // 切换 AI 聊天窗口
 const toggleAIChat = () => {
   showAIChat.value = !showAIChat.value;
-  
-  // 如果是第一次打开，且未询问过数据导入，则显示导入对话框
-  if (showAIChat.value && !hasAskedImport.value) {
-    showImportDialog.value = true;
-    hasAskedImport.value = true;
-  }
-};
-
-// 导入数据
-const importData = () => {
-  showImportDialog.value = false;
-  
-  // 等待 AI 聊天窗口加载完成后发送数据
-  setTimeout(() => {
-    if (cozeChatRef.value) {
-      cozeChatRef.value.sendSimulationData();
-    }
-  }, 1000);
-};
-
-// 跳过导入
-const skipImport = () => {
-  showImportDialog.value = false;
-};
-
-// 关闭导入对话框
-const closeImportDialog = () => {
-  showImportDialog.value = false;
 };
 
 // 关闭 AI 聊天窗口
@@ -1869,102 +1823,6 @@ input[type="number"]:focus {
   }
 }
 
-/* 数据导入对话框 */
-.import-dialog-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1001;
-  animation: fadeIn 0.3s ease;
-}
-
-.import-dialog {
-  background: rgba(30, 41, 59, 0.98);
-  border: 1px solid rgba(6, 182, 212, 0.3);
-  border-radius: 16px;
-  padding: 2rem;
-  max-width: 400px;
-  width: 90%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  animation: slideUp 0.3s ease;
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.import-dialog-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  background: linear-gradient(135deg, #06B6D4, #3B82F6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin-bottom: 1rem;
-  text-align: center;
-}
-
-.import-dialog-text {
-  color: rgba(209, 213, 219, 1);
-  font-size: 1rem;
-  line-height: 1.6;
-  margin-bottom: 1.5rem;
-  text-align: center;
-}
-
-.import-dialog-buttons {
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-}
-
-.import-button {
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  border: none;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-size: 1rem;
-}
-
-.import-button-primary {
-  background: linear-gradient(135deg, #06B6D4, #0891B2);
-  color: white;
-  box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3);
-}
-
-.import-button-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(6, 182, 212, 0.4);
-}
-
-.import-button-secondary {
-  background: rgba(100, 116, 139, 0.3);
-  color: white;
-  border: 1px solid rgba(148, 163, 184, 0.5);
-}
-
-.import-button-secondary:hover {
-  background: rgba(100, 116, 139, 0.5);
-  transform: translateY(-2px);
-}
-
 /* 响应式设计 - AI 助手 */
 @media (max-width: 768px) {
   .ai-float-button {
@@ -1977,18 +1835,6 @@ input[type="number"]:focus {
   .ai-float-button .w-6 {
     width: 1.25rem;
     height: 1.25rem;
-  }
-  
-  .import-dialog {
-    padding: 1.5rem;
-  }
-  
-  .import-dialog-buttons {
-    flex-direction: column;
-  }
-  
-  .import-button {
-    width: 100%;
   }
 }
 </style>

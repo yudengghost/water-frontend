@@ -26,11 +26,16 @@
         <div v-if="messages.length === 0" class="ai-welcome">
           <div class="ai-welcome-icon">
             <svg class="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
             </svg>
           </div>
-          <h4 class="ai-welcome-title">欢迎使用 AI 溯源助手</h4>
-          <p class="ai-welcome-text">我可以帮助您分析水污染模拟数据、解答相关问题</p>
+          <h4 class="ai-welcome-title">水污染扩散分析专家</h4>
+          <p class="ai-welcome-text">您好！我是专业的水污染扩散分析专家，精通污染物扩散模型、数据分析和溯源计算。</p>
+          <div class="ai-welcome-features">
+            <div class="ai-welcome-feature">💡 解答模拟相关问题</div>
+            <div class="ai-welcome-feature">📊 分析模拟数据结果</div>
+            <div class="ai-welcome-feature">🔍 提供专业建议</div>
+          </div>
         </div>
 
         <div v-for="(msg, index) in messages" :key="index" class="ai-message" :class="msg.role">
@@ -92,7 +97,10 @@
           </button>
         </div>
         <div class="ai-input-tips">
-          <span class="ai-tip-item">💡 提示：您可以询问关于水污染扩散、参数优化、结果分析等问题</span>
+          <button @click="sendSimulationData" class="ai-tip-button" :disabled="isLoading">
+            📊 导入模拟数据
+          </button>
+          <span class="ai-tip-item">💡 您可以询问关于水污染扩散、参数优化、结果分析等问题</span>
         </div>
       </div>
     </div>
@@ -126,6 +134,30 @@ const inputRef = ref(null);
 // 优先从环境变量读取 API Key，如果没有则使用默认值（需要手动替换）
 const MOONSHOT_API_KEY = import.meta.env.VITE_MOONSHOT_API_KEY || 'sk-h9lgXt2uwJVe1xahapvIayJPwawUWhNIzD8XosCHZK0v4cdm';
 const MOONSHOT_API_URL = 'https://api.moonshot.cn/v1/chat/completions';
+
+// 消息配置
+const MAX_MESSAGES = 20; // 最大历史消息条数（不包括系统提示词）
+
+// 系统提示词
+const SYSTEM_PROMPT = {
+  role: 'system',
+  content: `你是一位专业的水污染扩散分析专家，具备以下专业能力：
+
+1. **水污染扩散理论**：精通一维、二维、三维污染物扩散模型，包括瞬时源和有限源模型
+2. **数学建模**：熟悉污染物扩散的数学方程，能够解释各种参数的物理意义
+3. **数据分析**：能够分析模拟数据，识别污染趋势，评估污染程度
+4. **溯源分析**：擅长反演计算，定位污染源位置和排放量
+5. **环境评估**：能够评估污染对水体的影响，提供防治建议
+
+你的主要职责：
+- 解答用户关于水污染扩散模拟的问题
+- 分析用户提供的模拟数据，给出专业治理见解
+- 解释模型参数的含义和影响
+- 提供污染防治和监测建议
+- 协助用户理解和优化模拟参数
+
+请用专业但易懂的语言回答问题，必要时使用数学公式和专业术语。对于复杂的概念，请给出清晰的解释。`
+};
 
 // 监听 visible 属性变化
 watch(() => props.visible, (newVal) => {
@@ -177,11 +209,17 @@ const sendMessage = async () => {
   scrollToBottom();
 
   try {
-    // 准备消息历史
-    const messageHistory = messages.value.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
+    // 限制历史消息数量（保留最近的消息）
+    const recentMessages = messages.value.slice(-MAX_MESSAGES);
+    
+    // 准备消息历史（系统提示词 + 最近的消息）
+    const messageHistory = [
+      SYSTEM_PROMPT,
+      ...recentMessages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }))
+    ];
 
     // 调用 Moonshot AI API
     const response = await fetch(MOONSHOT_API_URL, {
@@ -213,6 +251,9 @@ const sendMessage = async () => {
       timestamp: getCurrentTime()
     });
 
+    // 清理超出限制的历史消息（保留在内存中用于显示，但只发送最近的给 API）
+    // 这样用户仍然可以看到完整的对话历史
+    
   } catch (error) {
     console.error('发送消息失败:', error);
     
@@ -493,8 +534,35 @@ defineExpose({
 .ai-welcome-text {
   font-size: 0.875rem;
   color: rgba(148, 163, 184, 1);
-  margin: 0;
+  margin: 0 0 1.5rem 0;
   line-height: 1.6;
+  max-width: 400px;
+}
+
+.ai-welcome-features {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.ai-welcome-feature {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  color: rgba(6, 182, 212, 1);
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+}
+
+.ai-welcome-feature:hover {
+  background: rgba(6, 182, 212, 0.15);
+  border-color: rgba(6, 182, 212, 0.5);
+  transform: translateX(5px);
 }
 
 /* 消息气泡 */
@@ -654,7 +722,7 @@ defineExpose({
 
 .ai-input-wrapper {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.5rem;
   align-items: flex-end;
   margin-bottom: 0.5rem;
 }
@@ -683,6 +751,41 @@ defineExpose({
 
 .ai-input::placeholder {
   color: rgba(148, 163, 184, 0.6);
+}
+
+.ai-import-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.8), rgba(217, 119, 6, 0.8));
+  border: none;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.ai-import-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 1), rgba(217, 119, 6, 1));
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);
+}
+
+.ai-import-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.ai-import-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ai-import-button .w-5 {
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .ai-send-button {
@@ -735,13 +838,46 @@ defineExpose({
 .ai-input-tips {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.ai-tip-button {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.2));
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 8px;
+  padding: 0.375rem 0.75rem;
+  color: rgba(251, 191, 36, 1);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.ai-tip-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.3), rgba(217, 119, 6, 0.3));
+  border-color: rgba(245, 158, 11, 0.6);
+  transform: translateY(-1px);
+}
+
+.ai-tip-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.ai-tip-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .ai-tip-item {
   font-size: 0.75rem;
   color: rgba(148, 163, 184, 0.8);
   line-height: 1.4;
+  flex: 1;
+  min-width: 200px;
 }
 
 /* 响应式设计 */
@@ -771,6 +907,16 @@ defineExpose({
   .ai-input-area {
     padding: 0.75rem 1rem;
   }
+
+  .ai-input-tips {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .ai-tip-item {
+    min-width: auto;
+  }
 }
 
 @media (max-width: 480px) {
@@ -787,6 +933,18 @@ defineExpose({
   .ai-message-text {
     font-size: 0.875rem;
     padding: 0.625rem 0.875rem;
+  }
+
+  .ai-import-button,
+  .ai-send-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .ai-import-button .w-5,
+  .ai-send-button .w-5 {
+    width: 1.125rem;
+    height: 1.125rem;
   }
 }
 </style>

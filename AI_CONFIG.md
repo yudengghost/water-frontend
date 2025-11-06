@@ -59,9 +59,10 @@ const MOONSHOT_API_KEY = import.meta.env.VITE_MOONSHOT_API_KEY || 'sk-your-api-k
 
 ### 可用模型
 
-- `moonshot-v1-8k`：8K 上下文窗口（默认）
+- `moonshot-v1-8k`：8K 上下文窗口
 - `moonshot-v1-32k`：32K 上下文窗口
 - `moonshot-v1-128k`：128K 上下文窗口
+- `kimi-k2-turbo-preview`：最新 Kimi K2 模型（当前使用）
 
 ### API 参数说明
 
@@ -69,12 +70,38 @@ const MOONSHOT_API_KEY = import.meta.env.VITE_MOONSHOT_API_KEY || 'sk-your-api-k
 
 ```javascript
 {
-  model: 'moonshot-v1-8k',      // 使用的模型
-  messages: messageHistory,      // 对话历史
-  temperature: 0.7,              // 温度（0-1，越高越随机）
-  max_tokens: 2000,              // 最大回复长度
-  stream: false                  // 是否使用流式输出
+  model: 'kimi-k2-turbo-preview', // 使用的模型
+  messages: messageHistory,       // 对话历史（包含系统提示词）
+  temperature: 0.7,               // 温度（0-1，越高越随机）
+  max_tokens: 2000,               // 最大回复长度
+  stream: false                   // 是否使用流式输出
 }
+```
+
+### AI 专家设置
+
+本系统配置了专业的系统提示词，AI 助手被设定为"水污染扩散分析专家"，具备：
+
+- **专业能力**：精通一维、二维、三维污染物扩散模型
+- **数学建模**：熟悉污染物扩散的数学方程
+- **数据分析**：能够分析模拟数据，识别污染趋势
+- **溯源分析**：擅长反演计算，定位污染源
+- **环境评估**：能够评估污染影响，提供防治建议
+
+### 消息管理
+
+- **历史消息限制**：系统自动保留最近 20 条消息发送给 API
+- **完整历史显示**：用户界面仍显示完整对话历史
+- **系统提示词**：每次 API 调用都会附带专家身份设定
+
+如需修改这些设置，请编辑 `src/components/CozeChat.vue` 文件中的以下常量：
+
+```javascript
+const MAX_MESSAGES = 20;  // 修改历史消息限制
+const SYSTEM_PROMPT = {   // 修改系统提示词
+  role: 'system',
+  content: '...'
+};
 ```
 
 ### 价格说明
