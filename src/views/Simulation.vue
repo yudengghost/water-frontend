@@ -400,15 +400,13 @@ import CozeChat from '@/components/CozeChat.vue';
 /* ==================== 常量定义 ==================== */
 const CONSTANTS = {
   RIVER_WIDTH: 200,
-  MAX_PARTICLES: 200,
-  INITIAL_PARTICLES: 30,
-  PARTICLE_SIZE: 50, // 固定粒子大小
   CHART_UPDATE_INTERVAL: 2000, // 2秒
   CHART_MAX_POINTS: 20,
   RIVER_PATH_STEP: 10,
-  CONCENTRATION_THRESHOLD: 0.3,
-  DECAY_RATE: 0.997,
-  BOUNDARY_LIMIT: 0.85 // 河道边界限制比例
+  HEATMAP_GRID_SIZE: 8, // 进一步减小网格大小以获得更精细的效果
+  MAX_CONCENTRATION: 10, // 最大浓度用于颜色映射
+  CONCENTRATION_THRESHOLD: 0.001, // 浓度阈值，降低阈值以显示更多细节
+  RIVER_WIDTH_SCALE: 10 // 10像素 = 1米
 };
 
 /* ==================== 响应式状态 ==================== */
@@ -452,15 +450,13 @@ const simulation = reactive({
   // 河道数据
   riverWidth: CONSTANTS.RIVER_WIDTH,
   riverPath: [],
-  pollutionSegments: [],
-  maxSegments: CONSTANTS.MAX_PARTICLES,
+  
+  // 热力图数据
+  heatmapData: null,
   
   // 图表数据
   chartData: [],
   chartCategories: [],
-  
-  // 科学模式计算结果
-  scientificData: [],
   
   // 观测点
   observationPoint: {
@@ -508,9 +504,13 @@ const maxConcentration = computed(() => {
 
 // 污染扩散范围
 const diffusionRange = computed(() => {
-  if (simulation.pollutionSegments.length === 0) return 0;
-  const maxX = Math.max(...simulation.pollutionSegments.map(s => s.x + CONSTANTS.PARTICLE_SIZE));
-  return Math.floor(maxX / 2); // 转换为米数
+  // 对于热力图，扩散范围基于当前时间计算
+  const t = simulation.currentTime / 1000;
+  if (t <= 0) return 0;
+  
+  // 使用扩散系数估算扩散范围
+  const diffusionDistance = Math.sqrt(simulation.params.D * t) * 10; // 转换为像素
+  return Math.min(Math.floor(diffusionDistance), 1000); // 限制最大值
 });
 
 // 模拟时长（秒）
@@ -582,11 +582,7 @@ const warningMessages = computed(() => {
   }
   
   // 系统状态预警
-  if (simulation.pollutionSegments.length > simulation.maxSegments * 0.8) {
-    warnings.push('<div class="text-yellow-400 text-sm flex items-center">粒子数量接近上限</div>');
-  } else {
-    warnings.push('<div class="text-green-400 text-sm flex items-center">系统运行正常</div>');
-  }
+  warnings.push('<div class="text-green-400 text-sm flex items-center">系统运行正常</div>');
   
   return warnings.join('');
 });
@@ -720,39 +716,19 @@ const initRiverPath = () => {
   }
 };
 
-// 初始化污染粒子
-const initPollutionSegments = () => {
-  simulation.pollutionSegments = [];
+// 初始化热力图数据
+const initHeatmapData = () => {
+  if (!simulationCanvas.value) return;
   
-  const startX = 50; // 河道起点
-  const startY = simulation.riverPath[0]?.y || simulationCanvas.value.height / 2;
-  const halfRiverWidth = simulation.riverWidth / 2;
+  const width = Math.ceil(simulationCanvas.value.width / CONSTANTS.HEATMAP_GRID_SIZE);
+  const height = Math.ceil(simulationCanvas.value.height / CONSTANTS.HEATMAP_GRID_SIZE);
   
-  // 基础浓度：根据污染源类型设置
-  const baseConcentration = simulation.sourceType === 'instant' ? 
-    simulation.params.M / 100 : 
-    simulation.params.C0 / 10;
-  
-  // 创建初始粒子分布
-  for (let i = 0; i < CONSTANTS.INITIAL_PARTICLES; i++) {
-    const xOffset = i * 15 + Math.random() * 10;
-    const currentX = startX + xOffset;
-    const riverCenterY = getRiverCenterY(currentX);
-    
-    // 考虑粒子半径，确保不超出河道
-    const maxOffset = halfRiverWidth - CONSTANTS.PARTICLE_SIZE / 2;
-    const yOffset = (Math.random() - 0.5) * maxOffset * 2 * 0.8;
-    
-    simulation.pollutionSegments.push({
-      x: currentX,
-      y: riverCenterY + yOffset,
-      vx: 1.0 + Math.random() * 0.3,
-      vy: (Math.random() - 0.5) * 0.5,
-      size: CONSTANTS.PARTICLE_SIZE, // 固定大小
-      concentration: Math.max(0.5, baseConcentration * (1 - i * 0.02) + (Math.random() - 0.5) * 0.5),
-      age: 0
-    });
-  }
+  simulation.heatmapData = {
+    width,
+    height,
+    grid: new Array(width * height).fill(0),
+    lastUpdateTime: 0
+  };
 };
 
 /* ==================== 辅助工具函数 ==================== */
@@ -859,9 +835,10 @@ const resetSimulation = () => {
   simulation.chartData = [];
   simulation.chartCategories = [];
   lastChartUpdate = 0;
+  simulation.heatmapData = null;
   
-  // 重新初始化污染粒子
-  initPollutionSegments();
+  // 重新初始化热力图数据
+  initHeatmapData();
   
   // 清空图表
   if (chartInstance) {
@@ -931,86 +908,89 @@ const updateSimulation = (timestamp) => {
     // 更新模拟时间
     simulation.currentTime += deltaTime * simulation.speed;
     
-    // 两种模式都使用粒子动画
-    const halfRiverWidth = simulation.riverWidth / 2;
-    const particleRadius = CONSTANTS.PARTICLE_SIZE / 2;
-    
-    // === 更新每个污染粒子 ===
-    simulation.pollutionSegments.forEach(segment => {
-      // 1. 获取河道方向和中心位置
-      const riverDirection = getRiverDirection(segment.x);
-      const riverCenterY = getRiverCenterY(segment.x);
-      
-      // 2. 粒子沿河道方向流动（使用固定速度）
-      const flowSpeed = 2.0 * segment.vx; // 固定水流速度
-      segment.x += riverDirection.dx * flowSpeed * 0.5;
-      segment.y += riverDirection.dy * flowSpeed * 0.5;
-      
-      // 3. 计算相对于河道中心的偏移
-      let offsetFromCenter = segment.y - riverCenterY;
-      
-      // 4. 横向扩散运动（垂直于河道方向）
-      const diffusionSpeed = simulation.params.D * 0.5; // 使用扩散系数
-      segment.vy += (Math.random() - 0.5) * diffusionSpeed * 0.1;
-      segment.vy *= 0.98; // 速度阻尼
-      offsetFromCenter += segment.vy;
-      
-      // 5. 限制粒子在河道范围内（考虑粒子半径）
-      const maxOffset = halfRiverWidth - particleRadius;
-      if (Math.abs(offsetFromCenter) > maxOffset) {
-        offsetFromCenter = Math.sign(offsetFromCenter) * maxOffset;
-        segment.vy *= -0.5; // 边界反弹
-      }
-      segment.y = riverCenterY + offsetFromCenter;
-      
-      // 6. 更新粒子年龄
-      segment.age += deltaTime;
-      
-      // 7. 浓度衰减（基于扩散稀释）
-      segment.concentration *= 0.998;
-    });
-    
-    // === 清理过期粒子 ===
-    const canvasWidth = simulationCanvas.value.width;
-    const canvasHeight = simulationCanvas.value.height;
-    simulation.pollutionSegments = simulation.pollutionSegments.filter(
-      segment => segment.x < canvasWidth + 200 && 
-                 segment.x > -200 &&
-                 segment.y > -100 && 
-                 segment.y < canvasHeight + 100 && 
-                 segment.concentration > CONSTANTS.CONCENTRATION_THRESHOLD
-    );
-    
-    // === 在源头生成新污染粒子 ===
-    if (simulation.pollutionSegments.length < CONSTANTS.MAX_PARTICLES) {
-      const startX = 50; // 河道起点
-      const riverCenterY = getRiverCenterY(startX);
-      
-      // 基础浓度：根据污染源类型设置
-      const baseConcentration = simulation.sourceType === 'instant' ? 
-        simulation.params.M / 100 : 
-        simulation.params.C0 / 10;
-      
-      const particlesToAdd = Math.random() < 0.5 ? 2 : 1;
-      
-      // 考虑粒子半径，确保生成的粒子完全在河道内
-      const maxOffset = halfRiverWidth - particleRadius;
-      
-      for (let i = 0; i < particlesToAdd; i++) {
-        const yOffset = (Math.random() - 0.5) * maxOffset * 2 * 0.7;
-        
-        simulation.pollutionSegments.push({
-          x: startX + (Math.random() - 0.5) * 15,
-          y: riverCenterY + yOffset,
-          vx: 1.0 + Math.random() * 0.3,
-          vy: (Math.random() - 0.5) * 0.5,
-          size: CONSTANTS.PARTICLE_SIZE, // 固定大小
-          concentration: Math.max(0.5, baseConcentration + (Math.random() - 0.5) * baseConcentration * 0.3),
-          age: 0
-        });
-      }
+    // 更新热力图数据（每100ms更新一次，避免过于频繁）
+    if (simulation.currentTime - (simulation.heatmapData?.lastUpdateTime || 0) > 100) {
+      updateHeatmapData();
     }
   }
+};
+
+// 更新热力图数据
+const updateHeatmapData = () => {
+  if (!simulationCanvas.value || !simulation.heatmapData) return;
+  
+  const t = simulation.currentTime / 1000; // 转换为秒
+  const canvasWidth = simulationCanvas.value.width;
+  const canvasHeight = simulationCanvas.value.height;
+  const gridWidth = simulation.heatmapData.width;
+  const gridHeight = simulation.heatmapData.height;
+  
+  // 污染源位置（河道起点）
+  const sourceX = 50;
+  const sourceY = simulation.riverPath[0]?.y || canvasHeight / 2;
+  
+  // 重置热力图数据
+  simulation.heatmapData.grid.fill(0);
+  
+  // 计算每个网格点的浓度
+  for (let gridY = 0; gridY < gridHeight; gridY++) {
+    for (let gridX = 0; gridX < gridWidth; gridX++) {
+      const pixelX = gridX * CONSTANTS.HEATMAP_GRID_SIZE + CONSTANTS.HEATMAP_GRID_SIZE / 2;
+      const pixelY = gridY * CONSTANTS.HEATMAP_GRID_SIZE + CONSTANTS.HEATMAP_GRID_SIZE / 2;
+      
+      // 跳过河道外的点（简单矩形河道判断）
+      const riverCenterY = getRiverCenterY(pixelX);
+      const halfRiverWidth = simulation.riverWidth / 2;
+      if (Math.abs(pixelY - riverCenterY) > halfRiverWidth) {
+        continue;
+      }
+      
+      // 转换为实际坐标（米）
+      const actualX = (pixelX - sourceX) / CONSTANTS.RIVER_WIDTH_SCALE;
+      const actualY = (pixelY - sourceY) / CONSTANTS.RIVER_WIDTH_SCALE;
+      
+      // 只计算下游区域（X >= 0）
+      if (actualX < 0) continue;
+      
+      let concentration = 0;
+      
+      try {
+        if (simulation.dimension === '1D') {
+          if (simulation.sourceType === 'instant') {
+            concentration = calculator.calculate1D(actualX, t, simulation.params.M, simulation.params.D);
+          } else {
+            concentration = calculator.calculate1Dli(actualX, t, simulation.params.C0, simulation.params.D, simulation.params.h);
+          }
+        } else if (simulation.dimension === '2D') {
+          if (simulation.sourceType === 'instant') {
+            concentration = calculator.calculate2D(actualX, actualY, t, simulation.params.M, simulation.params.D, simulation.params.D);
+          } else {
+            concentration = calculator.calculate2Dli(actualX, actualY, t, simulation.params.C0, simulation.params.D, simulation.params.h, simulation.params.b);
+          }
+        }
+        // 3D 在2D热力图中简化为2D处理
+        else if (simulation.dimension === '3D') {
+          if (simulation.sourceType === 'instant') {
+            concentration = calculator.calculate2D(actualX, actualY, t, simulation.params.M, simulation.params.D, simulation.params.D);
+          } else {
+            concentration = calculator.calculate2Dli(actualX, actualY, t, simulation.params.C0, simulation.params.D, simulation.params.h, simulation.params.b);
+          }
+        }
+      } catch (error) {
+        console.error('计算热力图浓度时出错:', error);
+        concentration = 0;
+      }
+      
+      // 限制浓度范围
+      concentration = Math.max(0, Math.min(concentration, CONSTANTS.MAX_CONCENTRATION));
+      
+      // 存储到网格中
+      const index = gridY * gridWidth + gridX;
+      simulation.heatmapData.grid[index] = concentration;
+    }
+  }
+  
+  simulation.heatmapData.lastUpdateTime = simulation.currentTime;
 };
 
 /* ==================== 渲染函数 ==================== */
@@ -1020,14 +1000,17 @@ const renderSimulation = () => {
   if (!ctx) return;
   
   // 清空画布（轻微拖尾效果让运动更流畅）
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.15)';
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.1)';
   ctx.fillRect(0, 0, simulationCanvas.value.width, simulationCanvas.value.height);
   
-    render2DRiver();
+  render2DRiver();
 };
 
-// 渲染2D河道和污染粒子
+// 渲染2D河道和热力图
 const render2DRiver = () => {
+  const canvasWidth = simulationCanvas.value.width;
+  const canvasHeight = simulationCanvas.value.height;
+  
   // === 1. 绘制河流基础 ===
   ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)';
   ctx.lineWidth = simulation.riverWidth;
@@ -1044,62 +1027,106 @@ const render2DRiver = () => {
   });
   ctx.stroke();
   
-  // === 2. 绘制污染粒子 ===
-  // 按浓度排序（从低到高），先绘制低浓度的，产生自然叠加效果
-  const sortedSegments = [...simulation.pollutionSegments].sort((a, b) => a.concentration - b.concentration);
-  
-  sortedSegments.forEach(segment => {
-    const color = getConcentrationColor(segment.concentration);
+  // === 2. 绘制热力图（使用平滑插值）===
+  if (simulation.heatmapData) {
+    // 创建临时画布用于热力图
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvasWidth;
+    tempCanvas.height = canvasHeight;
+    const tempCtx = tempCanvas.getContext('2d');
     
-    // 创建径向渐变，从中心到边缘
-    const gradient = ctx.createRadialGradient(
-      segment.x, segment.y, 0,
-      segment.x, segment.y, segment.size
-    );
+    const imageData = tempCtx.createImageData(canvasWidth, canvasHeight);
+    const data = imageData.data;
     
-    // 解析RGB颜色
-    const matches = color.match(/\d+/g);
-    if (matches && matches.length >= 3) {
-      const r = matches[0];
-      const g = matches[1];
-      const b = matches[2];
-      
-      // 根据浓度调整透明度
-      const alpha = Math.min(0.7, segment.concentration / 10);
-      
-      gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha})`);
-      gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${alpha * 0.5})`);
-      gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-      
-      ctx.fillStyle = gradient;
-      
-      // 启用模糊效果
-      ctx.shadowBlur = segment.size * 0.5;
-      ctx.shadowColor = color;
-      
-      ctx.beginPath();
-      ctx.arc(segment.x, segment.y, segment.size, 0, Math.PI * 2);
-    ctx.fill();
-      
-      // 重置阴影
-    ctx.shadowBlur = 0;
+    // 清空图像数据
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = 0;     // R
+      data[i + 1] = 0; // G
+      data[i + 2] = 0; // B
+      data[i + 3] = 0; // A
     }
-  });
-  
-  ctx.globalAlpha = 1.0;
+    
+    const gridWidth = simulation.heatmapData.width;
+    const gridHeight = simulation.heatmapData.height;
+    
+    // 使用双线性插值创建平滑过渡
+    for (let y = 0; y < canvasHeight; y++) {
+      for (let x = 0; x < canvasWidth; x++) {
+        // 跳过河道外的点
+        const riverCenterY = getRiverCenterY(x);
+        const halfRiverWidth = simulation.riverWidth / 2;
+        if (Math.abs(y - riverCenterY) > halfRiverWidth) {
+          continue;
+        }
+        
+        // 计算对应的网格坐标（浮点数）
+        const gridX = x / CONSTANTS.HEATMAP_GRID_SIZE;
+        const gridY = y / CONSTANTS.HEATMAP_GRID_SIZE;
+        
+        // 双线性插值
+        const x1 = Math.floor(gridX);
+        const y1 = Math.floor(gridY);
+        const x2 = Math.min(x1 + 1, gridWidth - 1);
+        const y2 = Math.min(y1 + 1, gridHeight - 1);
+        
+        if (x1 < 0 || y1 < 0 || x1 >= gridWidth || y1 >= gridHeight) {
+          continue;
+        }
+        
+        const q11 = simulation.heatmapData.grid[y1 * gridWidth + x1] || 0;
+        const q12 = simulation.heatmapData.grid[y2 * gridWidth + x1] || 0;
+        const q21 = simulation.heatmapData.grid[y1 * gridWidth + x2] || 0;
+        const q22 = simulation.heatmapData.grid[y2 * gridWidth + x2] || 0;
+        
+        const dx = gridX - x1;
+        const dy = gridY - y1;
+        
+        // 双线性插值公式
+        const concentration = q11 * (1 - dx) * (1 - dy) +
+                             q21 * dx * (1 - dy) +
+                             q12 * (1 - dx) * dy +
+                             q22 * dx * dy;
+        
+        if (concentration > CONSTANTS.CONCENTRATION_THRESHOLD) {
+          const color = getConcentrationColor(concentration);
+          const matches = color.match(/\d+/g);
+          
+          if (matches && matches.length >= 3) {
+            const r = parseInt(matches[0]);
+            const g = parseInt(matches[1]);
+            const b = parseInt(matches[2]);
+            const alpha = Math.min(255, Math.floor(concentration / CONSTANTS.MAX_CONCENTRATION * 230));
+            
+            const pixelIndex = (y * canvasWidth + x) * 4;
+            data[pixelIndex] = r;
+            data[pixelIndex + 1] = g;
+            data[pixelIndex + 2] = b;
+            data[pixelIndex + 3] = alpha;
+          }
+        }
+      }
+    }
+    
+    // 绘制图像数据到临时画布
+    tempCtx.putImageData(imageData, 0, 0);
+    
+    // 将热力图绘制到主画布上，确保不覆盖河道
+    ctx.globalAlpha = 0.9; // 降低热力图透明度，让河道更清晰
+    ctx.filter = 'blur(0.5px)';
+    ctx.drawImage(tempCanvas, 0, 0);
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1.0;
+  }
   
   // === 3. 绘制污染源和观测点标记 ===
-  const canvasWidth = simulationCanvas.value.width;
-  const canvasHeight = simulationCanvas.value.height;
-  
   // 污染源在河道起点（左侧），坐标系统中为(0,0)
   const sourceX = 50; // 河道起点x坐标
   const sourceY = simulation.riverPath[0]?.y || canvasHeight / 2; // 河道起点y坐标
   
   // 将观测点坐标转换为画布坐标
   // 观测点坐标是相对于污染源的，假设：10像素 = 1米
-  const observationCanvasX = sourceX + simulation.observationPoint.x * 10;
-  const observationCanvasY = sourceY + simulation.observationPoint.y * 10;
+  const observationCanvasX = sourceX + simulation.observationPoint.x * CONSTANTS.RIVER_WIDTH_SCALE;
+  const observationCanvasY = sourceY + simulation.observationPoint.y * CONSTANTS.RIVER_WIDTH_SCALE;
   
   // 绘制污染源标记（河道起点）
   ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
@@ -1127,7 +1154,7 @@ const render2DRiver = () => {
   
   ctx.fillStyle = 'rgba(255, 255, 255, 1)';
   ctx.font = 'bold 12px Arial';
-  const obsLabel = simulation.dimension === '1D' ? 
+  const obsLabel = simulation.dimension === '1D' ?
     `观测点(${simulation.observationPoint.x}m)` :
     simulation.dimension === '2D' ?
     `观测点(${simulation.observationPoint.x},${simulation.observationPoint.y}m)` :
@@ -1205,7 +1232,7 @@ onMounted(() => {
   initCanvas(); // 初始化画布
   initConcentrationChart(); // 初始化图表
   initRiverPath(); // 初始化河道路径
-  initPollutionSegments(); // 初始化污染粒子
+  initHeatmapData(); // 初始化热力图数据
   startAnimationLoop(); // 开始动画循环
 });
 
