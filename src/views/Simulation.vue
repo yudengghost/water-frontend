@@ -101,6 +101,7 @@
               <select v-model="simulation.sourceType" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white">
                 <option value="instant">瞬时源</option>
                 <option value="finite">初始有限源</option>
+                <option value="continuous">连续源</option>
               </select>
           </div>
           
@@ -111,6 +112,9 @@
                 <option value="2D">二维</option>
                 <option value="3D">三维</option>
               </select>
+              <p class="text-xs text-gray-400 mt-1" v-if="simulation.sourceType === 'continuous'">
+                连续源目前仅支持二维计算
+              </p>
             </div>
 
             <!-- 正演参数输入 -->
@@ -143,6 +147,28 @@
               <div v-if="simulation.dimension === '3D' && simulation.sourceType === 'finite'">
                 <label class="block text-sm text-gray-300 mb-2">污染源半高 (m)</label>
                 <input type="number" v-model.number="simulation.params.c" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" min="1" step="1">
+              </div>
+
+              <!-- 连续源参数输入 -->
+              <div v-if="simulation.sourceType === 'continuous'" class="space-y-3">
+                <div class="bg-cyan-900 bg-opacity-30 border border-cyan-600 rounded-lg p-3 mb-3">
+                  <p class="text-xs text-cyan-300">连续源计算：污染物持续排放，适用于河流污染的长期扩散模拟。</p>
+                </div>
+                
+                <div>
+                  <label class="block text-sm text-gray-300 mb-2">排放强度 m (g/(s·m))</label>
+                  <input type="number" v-model.number="simulation.params.m" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" min="0.1" step="0.1">
+                </div>
+
+                <div>
+                  <label class="block text-sm text-gray-300 mb-2">平均流速 u (m/s)</label>
+                  <input type="number" v-model.number="simulation.params.u" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" min="0.1" step="0.1">
+                </div>
+
+                <div>
+                  <label class="block text-sm text-gray-300 mb-2">Y方向扩散系数 Ey (m²/s)</label>
+                  <input type="number" v-model.number="simulation.params.Ey" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" min="0.01" step="0.01">
+                </div>
               </div>
             </div>
 
@@ -197,11 +223,11 @@
                   <label class="block text-sm text-gray-300 mb-2">X 坐标 (m)</label>
                   <input type="number" v-model.number="simulation.observationPoint.x" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" step="1">
                 </div>
-                <div v-if="simulation.dimension !== '1D'">
+                <div v-if="simulation.dimension !== '1D' || simulation.sourceType === 'continuous'">
                   <label class="block text-sm text-gray-300 mb-2">Y 坐标 (m)</label>
                   <input type="number" v-model.number="simulation.observationPoint.y" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" step="1">
                 </div>
-                <div v-if="simulation.dimension === '3D'">
+                <div v-if="simulation.dimension === '3D' && simulation.sourceType !== 'continuous'">
                   <label class="block text-sm text-gray-300 mb-2">Z 坐标 (m)</label>
                   <input type="number" v-model.number="simulation.observationPoint.z" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white" step="1">
                   <p class="text-xs text-gray-400 mt-1">水深方向，0为水面</p>
@@ -315,7 +341,10 @@
               </div>
               <div class="flex justify-between" v-if="simulation.calculationType === 'forward'">
                 <span class="text-gray-300">计算公式</span>
-                <span class="text-white">{{ simulation.sourceType === 'instant' ? '瞬时源' : '有限源' }}</span>
+                <span class="text-white">{{ 
+                  simulation.sourceType === 'instant' ? '瞬时源' : 
+                  simulation.sourceType === 'finite' ? '有限源' : '连续源'
+                }}</span>
               </div>
               <div class="flex justify-between" v-if="simulation.calculationType === 'forward'">
                 <span class="text-gray-300">维度</span>
@@ -362,6 +391,18 @@
                   <span v-else>{{ simulation.params.h }}×{{ simulation.params.b }}×{{ simulation.params.c }}m</span>
                 </span>
               </div>
+              <div v-if="simulation.sourceType === 'continuous'" class="flex justify-between">
+                <span class="text-gray-300">排放强度 m</span>
+                <span class="text-white">{{ simulation.params.m }} g/(s·m)</span>
+              </div>
+              <div v-if="simulation.sourceType === 'continuous'" class="flex justify-between">
+                <span class="text-gray-300">平均流速 u</span>
+                <span class="text-white">{{ simulation.params.u }} m/s</span>
+              </div>
+              <div v-if="simulation.sourceType === 'continuous'" class="flex justify-between">
+                <span class="text-gray-300">Y方向扩散系数</span>
+                <span class="text-white">{{ simulation.params.Ey }} m²/s</span>
+              </div>
             </div>
             
             <!-- 反演模式参数 -->
@@ -394,7 +435,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue';
 import * as echarts from 'echarts';
 import * as calculator from '@/utils/pollutionCalculator';
-import { inverseCalculate1D } from '@/utils/pollutionCalculator';
+import { inverseCalculate1D, calculate2DContinuous } from '@/utils/pollutionCalculator';
 import CozeChat from '@/components/CozeChat.vue';
 
 /* ==================== 常量定义 ==================== */
@@ -423,7 +464,7 @@ const simulation = reactive({
   
   // 模拟模式（固定为科学模式）
   mode: 'scientific',
-  sourceType: 'instant', // 'instant' 或 'finite'
+  sourceType: 'instant', // 'instant', 'finite', 或 'continuous'
   dimension: '2D', // '1D', '2D', '3D'
   
   // 科学模式参数
@@ -433,7 +474,11 @@ const simulation = reactive({
     D: 1.0, // 扩散系数 (m²/s)
     h: 5, // 污染源半长 (m)
     b: 5, // 污染源半宽 (m)
-    c: 5  // 污染源半高 (m)
+    c: 5,  // 污染源半高 (m)
+    // 连续源参数
+    m: 100, // 污染物排放强度 g/(s*m)
+    u: 2.0, // 平均流速 m/s
+    Ey: 1.0 // y方向扩散系数 (m²/s)
   },
   
   // 反演参数
@@ -541,8 +586,11 @@ const observationConcentration = computed(() => {
     } else if (simulation.dimension === '2D') {
       if (simulation.sourceType === 'instant') {
         concentration = calculator.calculate2D(x, y, timeForCalculation, simulation.params.M, simulation.params.D, simulation.params.D);
-      } else {
+      } else if (simulation.sourceType === 'finite') {
         concentration = calculator.calculate2Dli(x, y, timeForCalculation, simulation.params.C0, simulation.params.D, simulation.params.h, simulation.params.b);
+      } else if (simulation.sourceType === 'continuous') {
+        // 连续源计算：使用x方向距离，y方向距离，y方向扩散系数，排放强度和流速
+        concentration = calculator.calculate2DContinuous(x, y, simulation.params.Ey, simulation.params.m, simulation.params.u);
       }
     } else if (simulation.dimension === '3D') {
       if (simulation.sourceType === 'instant') {

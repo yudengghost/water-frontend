@@ -77,6 +77,33 @@ export function calculate3D(x, y, z, t, M, Dx, Dy, Dz) {
   return isNaN(result) || !isFinite(result) ? 0 : result;
 }
 
+/* ==================== 连续源公式 ==================== */
+
+/**
+ * 二维扩散时间连续源公式
+ * @param {number} x x方向到污染源距离
+ * @param {number} y y方向到污染源距离
+ * @param {number} Ey y方向扩散系数
+ * @param {number} m 污染物排放强度，单位为 g/(s*m)
+ * @param {number} u 平均流速
+ * @returns 指定点的浓度
+ */
+export function calculate2DContinuous(x, y, Ey, m, u) {
+  // 参数验证
+  if (x <= 0 || Ey <= 0 || m <= 0 || u <= 0) return 0;
+  
+  const inexp = -((y * y) * u) / (4 * Ey * x);
+  
+  // 避免指数过小导致的数值下溢
+  if (inexp < -100) return 0;
+  
+  const exp = Math.exp(inexp);
+  const denominator = Math.sqrt(4 * Math.PI * Ey * x);
+  const result = m * exp / denominator;
+  
+  return isNaN(result) || !isFinite(result) ? 0 : result;
+}
+
 /* ==================== 初始有限源公式 ==================== */
 
 /**
